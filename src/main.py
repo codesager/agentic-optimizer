@@ -56,24 +56,32 @@ def print_portfolio_results(state: SMAState) -> None:
     else:
         print("\n⚠️  No portfolio generated.")
     
-    # Print approval/rejection status
-    feedback = state.get("feedback", "")
-    if feedback:
-        print("📝 REVIEWER FEEDBACK:")
+    # Print audit trail / feedback
+    feedback_list = state.get("feedback", [])
+    if feedback_list:
+        print("\n📝 AGENT ACTIVITY LOG:")
         print("-" * 80)
         
-        # Check if approved
-        if "approved" in feedback.lower():
+        # Check overall status from the last message
+        last_feedback = feedback_list[-1].lower()
+        if "approved" in last_feedback:
             print("✅ STATUS: APPROVED")
+        elif "error" in last_feedback or "fail" in last_feedback:
+            print("❌ STATUS: FAILED")
         else:
-            print("❌ STATUS: NOT APPROVED")
+            print("⏳ STATUS: COMPLETED with feedback")
+
+        print("\nActivity History:")
+        for i, msg in enumerate(feedback_list, 1):
+            # Moderate truncation to avoid code-dumps in the log
+            display_msg = (msg[:1000] + '...') if len(msg) > 1000 else msg
+            print(f" {i}. {display_msg}")
         
-        print(f"\n{feedback}")
         print("-" * 80)
     
     # Print any errors or warnings
-    if not final_portfolio and not feedback:
-        print("\n⚠️  Workflow completed but no portfolio or feedback was generated.")
+    if not final_portfolio and not feedback_list:
+        print("\n❌ No data was generated at all. Check logs.")
     
     print("\n" + "="*80)
 
@@ -104,8 +112,11 @@ def main():
             "user_mandate": user_mandate
         }
         
-        # Invoke the LangGraph app
-        final_state = app.invoke(initial_state)
+        # Invoke the LangGraph app with higher recursion limit
+        final_state = app.invoke(
+            initial_state, 
+            config={"recursion_limit": 50}
+        )
         
         # Print results
         print_portfolio_results(final_state)

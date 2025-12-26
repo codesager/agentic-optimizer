@@ -6,7 +6,8 @@ in the LangGraph workflow. The state contains all necessary information for
 agents to collaborate on portfolio analysis, risk assessment, and customization.
 """
 
-from typing import TypedDict, Optional
+from typing import TypedDict, Optional, Annotated, List
+import operator
 import pandas as pd
 
 
@@ -23,11 +24,14 @@ class SMAState(TypedDict, total=False):
     structured_constraints: dict
     """The parsed JSON constraints (e.g., max_weights, excluded_sectors)."""
     
+    screener_criteria: dict
+    """Screening criteria for stock selection (e.g., market_cap_min, eps_max)."""
+    
     universe: list
     """List of tickers to consider."""
     
     market_data: pd.DataFrame
-    """Historical prices fetched from FMP."""
+    """Historical prices fetched from yfinance."""
     
     risk_model: dict
     """Covariance matrix and expected returns."""
@@ -38,5 +42,8 @@ class SMAState(TypedDict, total=False):
     final_portfolio: dict
     """Tickers and weights."""
     
-    feedback: str
-    """Comments from the Reviewer agent if optimization fails."""
+    optimization_retry_count: int
+    """Counter for optimization retries to prevent infinite loops."""
+    
+    feedback: Annotated[List[str], operator.add]
+    """A running log of comments and feedback from all agents."""

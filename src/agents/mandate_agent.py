@@ -21,7 +21,12 @@ class InvestmentConstraints(BaseModel):
     
     excluded_sectors: List[str] = Field(
         default_factory=list,
-        description="List of sectors to exclude from the portfolio"
+        description=(
+            "List of sectors to exclude. Map short forms like 'tech' to 'Technology' "
+            "and 'pharma' to 'Healthcare'. Valid sectors: Technology, Healthcare, "
+            "Financial, Energy, Basic Materials, Consumer Cyclical, Consumer Defensive, "
+            "Industrials, Real Estate, Utilities, Communication Services."
+        )
     )
     
     max_position_weight: float = Field(
@@ -42,19 +47,24 @@ class InvestmentConstraints(BaseModel):
         description="Target risk level: 'low', 'medium', or 'high'"
     )
 
+    screener_criteria: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Technical filters for the stock screener. "
+            "Include 'Market Cap.' (e.g. '+Mid (over $2bln)'), "
+            "'P/E' (e.g. 'Under 15'), or 'Index' (e.g. 'S&P 500'). "
+            "If user wants 'Growth', suggest positive EPS growth. "
+            "If 'Value', suggest low P/E. If 'Low Vol', suggest Beta < 1."
+        )
+    )
 
-def parse_mandate_node(state: SMAState) -> Dict[str, Dict]:
+
+def parse_mandate_node(state: SMAState) -> Dict:
     """
-    Node function for the Mandate Parsing Agent.
+    Node function for the Mandate Agent.
     
     Extracts structured constraints from the user mandate using OpenAI
     and updates the structured_constraints field in the state.
-    
-    Args:
-        state: The current SMAState containing user_mandate
-        
-    Returns:
-        Dictionary with structured_constraints to update in state
     """
     # Extract user mandate from state
     user_mandate = state.get("user_mandate", "")
@@ -62,16 +72,26 @@ def parse_mandate_node(state: SMAState) -> Dict[str, Dict]:
     if not user_mandate:
         # Return default constraints if no mandate provided
         default_constraints = InvestmentConstraints().model_dump()
-        return {"structured_constraints": default_constraints}
+        return {
+            "structured_constraints": default_constraints,
+            "feedback": ["No mandate provided, using default constraints."]
+        }
     
-    # Initialize OpenAI LLM with structured output
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Initialize OpenAI LLM with structured output - Upgrade to gpt-4o
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
     
-    # Create structured output chain
-    structured_llm = llm.with_structured_output(InvestmentConstraints)
+    # Create structured output chain - Use method="function_calling" to avoid strict schema validation errors
+    structured_llm = llm.with_structured_output(InvestmentConstraints, method="function_calling")
     
     # System prompt
-    system_prompt = "You are an expert Investment Consultant. Extract hard constraints from the user text into a JSON object."
+    system_prompt = (
+        "You are an expert Investment Consultant. Carefully extract all investment constraints "
+        "and technical screening criteria from the user's natural language mandate. "
+        "PAY SPECIAL ATTENTION to sector exclusions (e.g., 'avoid utilities', 'no tech'). "
+        "Map these to the canonical sector names: Technology, Healthcare, Financial, Energy, "
+        "Basic Materials, Consumer Cyclical, Consumer Defensive, Industrials, Real Estate, "
+        "Utilities, Communication Services."
+    )
     
     # Create prompt template
     prompt = ChatPromptTemplate.from_messages([
@@ -89,11 +109,22 @@ def parse_mandate_node(state: SMAState) -> Dict[str, Dict]:
         # Convert Pydantic model to dictionary
         constraints_dict = constraints.model_dump()
         
-        return {"structured_constraints": constraints_dict}
+        # Extract screener_criteria to separate field
+        screener_criteria = constraints_dict.pop("screener_criteria", {})
+        
+        return {
+            "structured_constraints": constraints_dict,
+            "screener_criteria": screener_criteria,
+            "optimization_retry_count": 0,
+            "feedback": ["Successfully parsed mandate and extracted investment constraints."]
+        }
         
     except Exception as e:
         print(f"Error parsing mandate: {e}")
         # Return default constraints on error
         default_constraints = InvestmentConstraints().model_dump()
-        return {"structured_constraints": default_constraints}
+        return {
+            "structured_constraints": default_constraints,
+            "feedback": [f"Error parsing mandate logic: {str(e)}"]
+        }
 

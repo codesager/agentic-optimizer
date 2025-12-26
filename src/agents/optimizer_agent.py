@@ -16,118 +16,88 @@ from src.state import SMAState
 load_dotenv()
 
 
-def generate_optimizer_code_node(state: SMAState) -> Dict[str, str]:
+def generate_optimizer_code_node(state: SMAState) -> Dict:
     """
     Node function for the Optimizer Agent.
     
     Generates Python code using cvxpy for portfolio optimization based on
     structured constraints and risk model data from the state.
-    
-    Args:
-        state: The current SMAState containing structured_constraints and risk_model
-        
-    Returns:
-        Dictionary with generated_python_code to update in state
     """
     # Extract required data from state
     structured_constraints = state.get("structured_constraints", {})
     risk_model = state.get("risk_model", {})
+    retry_count = state.get("optimization_retry_count", 0)
     
-    # Validate that required data exists
-    if not structured_constraints:
-        return {"generated_python_code": "# Error: No structured constraints found in state"}
+    # Check if we should even proceed
+    if not structured_constraints or not risk_model:
+        error_msg = "# Error: Missing " + ("constraints" if not structured_constraints else "risk model")
+        return {
+            "generated_python_code": error_msg,
+            "optimization_retry_count": retry_count + 1
+        }
     
-    if not risk_model:
-        return {"generated_python_code": "# Error: No risk model found in state"}
-    
-    # Initialize OpenAI LLM
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    print(f"🤖 Optimizer Agent: Generating code (Attempt {retry_count + 1})...")
+
+    # Initialize OpenAI LLM - Upgrade to gpt-4o
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
     
     # System prompt
     system_prompt = (
-        "You are a Quantitative Developer expert in Python and cvxpy. "
-        "Write a Python script to optimize a portfolio based on the provided constraints. "
-        "- Use `cvxpy` to minimize portfolio variance.\n"
-        "- Assume `mu` (expected returns) and `Sigma` (covariance) are available as numpy arrays.\n"
-        "- Output ONLY valid Python code string. Do not execute it yet."
+        "You are a Senior Quantitative Developer expert in Python, Numerical Optimization, and cvxpy. "
+        "Your task is to write high-quality, DCP-compliant Python code for portfolio optimization. "
+        "The environment already has 'mu' (expected returns) and 'Sigma' (covariance) pre-loaded as numpy arrays."
     )
     
-    # Format constraints for the prompt
-    constraints_str = json.dumps(structured_constraints, indent=2)
-    
-    # Extract risk model metadata (not the full arrays to avoid token limit)
+    # Format metadata
     mu = risk_model.get("mu", [])
     Sigma = risk_model.get("Sigma", [])
+    risk_model_info = json.dumps({
+        "num_assets": len(mu),
+        "mu_shape": f"({len(mu)},)",
+        "Sigma_shape": f"({len(Sigma)}, {len(Sigma[0]) if Sigma else 0})"
+    }, indent=2)
     
-    # Create summary of risk model instead of full data
-    risk_model_summary = {
-        "num_assets": len(mu) if mu else 0,
-        "mu_shape": f"({len(mu)},)" if mu else "unknown",
-        "Sigma_shape": f"({len(Sigma)}, {len(Sigma[0]) if Sigma else 0})" if Sigma else "unknown",
-        "mu_summary": {
-            "min": min(mu) if mu else 0,
-            "max": max(mu) if mu else 0,
-            "mean": sum(mu) / len(mu) if mu else 0
-        } if mu else {}
-    }
-    
-    risk_model_info = json.dumps(risk_model_summary, indent=2)
-    
-    # Create prompt template
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("human", """Generate Python code for portfolio optimization using cvxpy.
 
-Constraints:
-{constraints}
+Available variables:
+1. `mu`: Annualized expected returns.
+2. `Sigma`: Annualized covariance matrix.
+3. `n`: Number of assets.
 
-Risk Model Metadata:
-{risk_model}
+User Constraints: {constraints}
+Metadata: {risk_model}
 
-IMPORTANT: The actual mu (expected returns) and Sigma (covariance matrix) numpy arrays 
-are already available in the execution environment. Do NOT include them in your code.
-Just reference them as 'mu' and 'Sigma' in your cvxpy optimization code.
-
-Requirements:
-1. Minimize portfolio variance using cvxpy
-2. Apply constraints from the structured_constraints:
-   - max_position_weight: maximum weight for any single position (0.0 to 1.0)
-   - min_dividend_yield: minimum dividend yield (if applicable)
-   - target_risk: risk level ('low', 'medium', 'high')
-3. Use mu (expected returns) and Sigma (covariance matrix) - they are already defined as numpy arrays
-4. Return portfolio weights as a numpy array named 'weights'
-5. Output ONLY the Python code, no explanations or markdown formatting
-
-Generate the code:""")
+Implementation Requirements:
+1. Objective: Minimize `cp.quad_form(weights, Sigma)`.
+2. Constraints: sum(weights)==1, weights >= 0, weights <= max_position_weight (if provided).
+3. Handle risk levels (low/medium/high).
+4. Return results in `weights`.
+5. Output ONLY Python code.""")
     ])
     
-    # Create chain
     chain = prompt | llm
     
     try:
-        # Invoke the chain to get generated code
         response = chain.invoke({
-            "constraints": constraints_str,
+            "constraints": json.dumps(structured_constraints),
             "risk_model": risk_model_info
         })
         
-        # Extract code from response (handle both AIMessage and string responses)
         code = response.content if hasattr(response, 'content') else str(response)
-        
-        # Clean up the code - remove markdown code blocks if present
         code = code.strip()
-        if code.startswith("```python"):
-            code = code[9:]  # Remove ```python
-        elif code.startswith("```"):
-            code = code[3:]  # Remove ```
-        if code.endswith("```"):
-            code = code[:-3]  # Remove closing ```
-        code = code.strip()
+        if "```python" in code:
+            code = code.split("```python")[1].split("```")[0]
+        elif "```" in code:
+            code = code.split("```")[1].split("```")[0]
         
-        return {"generated_python_code": code}
-        
+        return {
+            "generated_python_code": code.strip(),
+            "optimization_retry_count": retry_count + 1
+        }
     except Exception as e:
-        error_msg = f"# Error generating optimizer code: {e}"
-        print(f"Error in optimizer agent: {e}")
-        return {"generated_python_code": error_msg}
-
+        return {
+            "generated_python_code": f"# Error: {str(e)}",
+            "optimization_retry_count": retry_count + 1
+        }

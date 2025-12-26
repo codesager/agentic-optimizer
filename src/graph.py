@@ -20,63 +20,10 @@ from src.state import SMAState
 # Load environment variables from .env file
 load_dotenv()
 from src.agents.mandate_agent import parse_mandate_node
+from src.agents.finviz_screener_agent import finviz_screener_node
+from src.agents.pricing_agent import pricing_agent_node
 from src.agents.optimizer_agent import generate_optimizer_code_node
-from src.tools.fmp_client import FMPClient
 from src.tools.executor import execute_optimizer_code
-
-
-def data_fetcher_node(state: SMAState) -> Dict:
-    """
-    Node function to fetch market data from FMP API.
-    
-    Fetches S&P 500 universe, filters by constraints if needed,
-    and retrieves historical prices for the universe.
-    """
-    try:
-        # Initialize FMP client
-        fmp_client = FMPClient()
-        
-        # Get S&P 500 universe
-        sp500_companies = fmp_client.get_sp500_universe()
-        
-        # Extract tickers
-        tickers = [company.get("symbol") for company in sp500_companies if company.get("symbol")]
-        
-        # Apply sector filtering if excluded_sectors are specified
-        structured_constraints = state.get("structured_constraints", {})
-        excluded_sectors = structured_constraints.get("excluded_sectors", [])
-        
-        if excluded_sectors:
-            # Filter out excluded sectors
-            filtered_companies = [
-                company for company in sp500_companies
-                if company.get("sector") not in excluded_sectors
-            ]
-            tickers = [company.get("symbol") for company in filtered_companies if company.get("symbol")]
-        
-        if not tickers:
-            return {
-                "universe": [],
-                "market_data": pd.DataFrame(),
-                "feedback": "No tickers available after applying constraints"
-            }
-        
-        # Fetch historical prices (252 trading days = ~1 year)
-        market_data = fmp_client.get_historical_prices(tickers, days=252)
-        
-        return {
-            "universe": tickers,
-            "market_data": market_data
-        }
-        
-    except Exception as e:
-        error_msg = f"Error fetching market data: {str(e)}"
-        print(error_msg)
-        return {
-            "universe": [],
-            "market_data": pd.DataFrame(),
-            "feedback": error_msg
-        }
 
 
 def risk_model_node(state: SMAState) -> Dict:
@@ -91,17 +38,32 @@ def risk_model_node(state: SMAState) -> Dict:
     if market_data is None or market_data.empty:
         return {
             "risk_model": {},
-            "feedback": "No market data available for risk model calculation"
+            "feedback": ["No market data available for risk model calculation"]
         }
     
     try:
+        # Handle missing data more robustly
+        # 1. Fill missing values (forward fill then backward fill)
+        filled_data = market_data.ffill().bfill()
+        
+        # 2. Drop columns (tickers) that still have any NaNs (these have no data at all)
+        initial_tickers = filled_data.columns.tolist()
+        clean_data = filled_data.dropna(axis=1)
+        remaining_tickers = clean_data.columns.tolist()
+        
+        if len(remaining_tickers) < len(initial_tickers):
+            dropped = list(set(initial_tickers) - set(remaining_tickers))
+            print(f"⚠️ Dropped {len(dropped)} tickers due to missing data: {dropped[:5]}...")
+
         # Calculate returns from prices
-        returns = market_data.pct_change().dropna()
+        returns = clean_data.pct_change()
+        # Drop the first row as it will be NaN after pct_change
+        returns = returns.dropna(axis=0, how='all')
         
         if returns.empty:
             return {
                 "risk_model": {},
-                "feedback": "Insufficient data to calculate returns"
+                "feedback": ["Insufficient data to calculate returns after cleaning"]
             }
         
         # Calculate expected returns (mean of returns, annualized)
@@ -114,27 +76,39 @@ def risk_model_node(state: SMAState) -> Dict:
         mu = np.asarray(mu).flatten()
         Sigma = np.asarray(Sigma)
         
+        # Check for any remaining NaNs in mu or Sigma
+        if np.isnan(mu).any() or np.isnan(Sigma).any():
+            return {
+                "risk_model": {},
+                "feedback": ["Calculated risk model contains NaN values"]
+            }
+
         # Validate dimensions match
         if mu.shape[0] != Sigma.shape[0] or mu.shape[0] != Sigma.shape[1]:
             return {
                 "risk_model": {},
-                "feedback": f"Dimension mismatch: mu.shape={mu.shape}, Sigma.shape={Sigma.shape}"
+                "feedback": [f"Dimension mismatch: mu.shape={mu.shape}, Sigma.shape={Sigma.shape}"]
             }
         
-        # Convert to lists for JSON serialization (numpy arrays aren't JSON serializable)
+        # Convert to lists for JSON serialization
         risk_model = {
             "mu": mu.tolist(),
-            "Sigma": Sigma.tolist()
+            "Sigma": Sigma.tolist(),
+            "tickers": remaining_tickers  # Store synchronized tickers
         }
         
-        return {"risk_model": risk_model}
+        print(f"✅ Risk model calculated for {len(remaining_tickers)} assets")
+        return {
+            "risk_model": risk_model,
+            "universe": remaining_tickers # Update universe to match risk model
+        }
         
     except Exception as e:
         error_msg = f"Error calculating risk model: {str(e)}"
         print(error_msg)
         return {
             "risk_model": {},
-            "feedback": error_msg
+            "feedback": [error_msg]
         }
 
 
@@ -149,75 +123,82 @@ def code_executor_node(state: SMAState) -> Dict:
     risk_model = state.get("risk_model", {})
     
     if not generated_python_code:
-        return {"feedback": "No generated code to execute"}
+        return {"feedback": ["No generated code to execute"]}
     
+    if generated_python_code.startswith("# Error"):
+        # This is a real generation error from the agent
+        return {"feedback": [f"Optimizer Agent encountered an issue: {generated_python_code}"]}
+
     if not risk_model:
-        return {"feedback": "No risk model available for code execution"}
+        return {"feedback": ["No risk model available for code execution"]}
     
+    print("⚙️ Executing optimization code...")
     # Execute the code
     result = execute_optimizer_code(generated_python_code, risk_model)
     
     if "error" in result:
         # Execution failed - return error as feedback
-        return {"feedback": result["error"]}
+        print(f"❌ Optimization execution failed: {result['error']}")
+        return {"feedback": [f"Optimization Error: {result['error']}"]}
     
     # Execution succeeded - map weights to tickers
     weights = result.get("weights", {})
     universe = state.get("universe", [])
     
+    if not weights:
+        return {"feedback": ["Optimization returned empty weights"]}
+
     # Map weights to tickers
     final_portfolio = {}
     for idx_str, weight in weights.items():
-        idx = int(idx_str)
-        if 0 <= idx < len(universe):
-            ticker = universe[idx]
-            final_portfolio[ticker] = weight
+        try:
+            idx = int(idx_str)
+            if 0 <= idx < len(universe):
+                ticker = universe[idx]
+                if weight > 1e-6: # Only include non-zero weights
+                    final_portfolio[ticker] = weight
+        except (ValueError, TypeError):
+            continue
     
-    return {"final_portfolio": final_portfolio}
+    print(f"✅ Optimization successful. Generated portfolio with {len(final_portfolio)} assets.")
+    return {
+        "final_portfolio": final_portfolio, 
+        "feedback": ["Optimization successful. Weights calculated."]
+    }
 
 
 def reviewer_agent_node(state: SMAState) -> Dict:
     """
     Node function for the Reviewer Agent.
-    
-    Reviews the final portfolio and provides approval or feedback
-    based on the original constraints and mandate.
     """
     final_portfolio = state.get("final_portfolio", {})
     structured_constraints = state.get("structured_constraints", {})
     user_mandate = state.get("user_mandate", "")
     
     if not final_portfolio:
-        return {
-            "feedback": "No portfolio to review"
-        }
+        return {"feedback": ["No portfolio to review"]}
     
-    # Initialize OpenAI LLM
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    # Initialize OpenAI LLM - Upgrade to gpt-4o
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
     
     # System prompt
     system_prompt = (
-        "You are an expert Portfolio Reviewer. Review the generated portfolio "
-        "against the original mandate and constraints. Provide a brief assessment "
+        "You are an expert Portfolio Reviewer. Critically assess the generated portfolio "
+        "against the original mandate and constraints. Provide a technical assessment "
         "and either approve or provide specific feedback for improvement."
     )
     
     # Create prompt template
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
-        ("human", """Review the following portfolio:
+        ("human", """Review the following portfolio construction:
 
-User Mandate:
-{user_mandate}
+User Mandate: {user_mandate}
+Constraints: {constraints}
+Final Portfolio: {portfolio}
 
-Constraints:
-{constraints}
-
-Final Portfolio:
-{portfolio}
-
-Provide your review. If the portfolio meets the requirements, respond with "APPROVED".
-If not, provide specific feedback on what needs to be improved.""")
+Provide your review. If the portfolio meets the requirements, end your response with "APPROVED".
+Otherwise, provide specific feedback on what needs to be improved.""")
     ])
     
     # Create chain
@@ -238,36 +219,55 @@ If not, provide specific feedback on what needs to be improved.""")
         review = response.content if hasattr(response, 'content') else str(response)
         review = review.strip()
         
-        return {"feedback": review}
+        return {"feedback": [f"Reviewer assessment: {review}"]}
         
     except Exception as e:
         error_msg = f"Error in reviewer agent: {str(e)}"
         print(error_msg)
-        return {"feedback": error_msg}
+        return {"feedback": [error_msg]}
 
 
 def should_retry_optimization(state: SMAState) -> str:
     """
     Conditional function to determine if optimization should be retried.
-    
-    Checks if there's an error in feedback (from code execution).
-    If error exists, route back to OptimizerAgent. Otherwise, proceed to ReviewerAgent.
+    Limits retries to 3 to prevent infinite loops.
     """
-    feedback = state.get("feedback", "")
-    if feedback and "error" in feedback.lower():
-        return "retry"
+    retry_count = state.get("optimization_retry_count", 0)
+    
+    # Check if we've exceeded the limit
+    if retry_count >= 3:
+        print(f"⚠️ Optimization retry limit reached ({retry_count}). Proceeding to review.")
+        return "review"
+
+    # Look at the last message in feedback
+    feedback_list = state.get("feedback", [])
+    last_feedback = feedback_list[-1].lower() if feedback_list else ""
+    
+    final_portfolio = state.get("final_portfolio", {})
+    
+    if not final_portfolio:
+        # If the failure is due to missing data (Risk Model), don't retry - it won't help.
+        if "missing risk model" in last_feedback or "no risk model" in last_feedback:
+            print("🚫 Missing data identified. Skipping retry.")
+            return "review"
+            
+        if any(kw in last_feedback for kw in ["error", "fail", "incomplete"]):
+            # Only retry if it's a code/logic issue that the LLM might fix
+            if any(term in last_feedback for term in ["code", "syntax", "solver", "infeasible", "dcp"]):
+                print(f"🔄 Retrying optimization (Total attempts so far: {retry_count})...")
+                return "retry"
+    
     return "review"
 
 
 def should_end(state: SMAState) -> str:
     """
     Conditional function to determine if workflow should end.
-    
-    Checks if portfolio is approved by reviewer based on feedback.
     """
-    feedback = state.get("feedback", "")
-    # Check if feedback indicates approval
-    if feedback and "approved" in feedback.lower():
+    feedback_list = state.get("feedback", [])
+    last_feedback = feedback_list[-1].lower() if feedback_list else ""
+    
+    if "approved" in last_feedback:
         return "end"
     return "continue"
 
@@ -284,7 +284,8 @@ def create_workflow() -> StateGraph:
     
     # Add nodes
     workflow.add_node("parse_mandate", parse_mandate_node)
-    workflow.add_node("fetch_data", data_fetcher_node)
+    workflow.add_node("screen_stocks", finviz_screener_node)
+    workflow.add_node("fetch_prices", pricing_agent_node)
     workflow.add_node("calculate_risk_model", risk_model_node)
     workflow.add_node("generate_optimizer_code", generate_optimizer_code_node)
     workflow.add_node("execute_code", code_executor_node)
@@ -294,11 +295,14 @@ def create_workflow() -> StateGraph:
     # Start -> MandateAgent
     workflow.set_entry_point("parse_mandate")
     
-    # MandateAgent -> DataFetcherNode
-    workflow.add_edge("parse_mandate", "fetch_data")
+    # MandateAgent -> FinvizScreenerNode
+    workflow.add_edge("parse_mandate", "screen_stocks")
     
-    # DataFetcherNode -> RiskModelNode
-    workflow.add_edge("fetch_data", "calculate_risk_model")
+    # FinvizScreenerNode -> PricingAgentNode
+    workflow.add_edge("screen_stocks", "fetch_prices")
+    
+    # PricingAgentNode -> RiskModelNode
+    workflow.add_edge("fetch_prices", "calculate_risk_model")
     
     # RiskModelNode -> OptimizerAgent
     workflow.add_edge("calculate_risk_model", "generate_optimizer_code")

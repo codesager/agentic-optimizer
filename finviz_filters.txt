@@ -1,0 +1,4 @@
+Possible filter options for market cap: ['Any', 'Mega ($200bln and more)', 'Large ($10bln to $200bln)', 'Mid ($2bln to $10bln)', 
+'Small ($300mln to $2bln)', 'Micro ($50mln to $300mln)', 'Nano (under $50mln)', '+Large (over $10bln)', '+Mid (over $2bln)', 
+'+Small (over $300mln)', '+Micro (over $50mln)', '-Large (under $200bln)', '-Mid (under $10bln)', '-Small (under $2bln)', 
+'-Micro (under $300mln)']
