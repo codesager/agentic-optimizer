@@ -15,3 +15,5 @@ uv.lock
 
 *.txt
 test*.*
+portfolio_allocation.csv
+portfolio_allocation.json

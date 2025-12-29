@@ -1,110 +1,100 @@
-# Setup Instructions for POMS Project
+# Setup Instructions for Agentic Optimizer
+
+This guide will help you set up the Agentic Optimizer environment on your local machine.
 
 ## Prerequisites
 
-You need Python 3.8 or higher installed on your system.
+- **Python 3.12** or higher.
+- **OpenAI API Key**: You need a valid API key from OpenAI to power the agents.
 
-### Check Python Installation
+## 1. System Preparation
 
-Open a terminal/command prompt and run:
+Ensure Python is installed and added to your system PATH.
+
 ```bash
 python --version
+# Should output Python 3.12.x or higher
 ```
 
-If Python is not found, you have a few options:
+## 2. Environment Variables
 
-1. **Install Python from python.org**: Download and install from https://www.python.org/downloads/
-   - Make sure to check "Add Python to PATH" during installation
+Create a `.env` file in the root directory of the project. This file is used to store sensitive configuration.
 
-2. **Use an existing Python installation**: If you have Python installed but it's not in PATH, you can:
-   - Use the full path to Python
-   - Or add Python to your system PATH
+**File:** `.env`
+```env
+OPENAI_API_KEY=sk-your_api_key_here
+```
 
-## Setup Virtual Environment
+## 3. Virtual Environment & Dependencies
 
-### On Windows:
+It is recommended to use a virtual environment to manage dependencies.
 
-**Option 1: Using the batch script**
-```bash
+### Windows
+
+**Option 1: Automatic Setup**
+Run the included batch script:
+```cmd
 setup_env.bat
 ```
 
-**Option 2: Manual setup**
-```bash
+**Option 2: Manual Setup**
+```cmd
 # Create virtual environment
 python -m venv venv
 
-# Activate virtual environment
-venv\Scripts\activate.bat
+# Activate it
+venv\Scripts\activate
 
 # Upgrade pip
 python -m pip install --upgrade pip
 
-# Install requirements
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### On Linux/Mac:
+### macOS / Linux
 
-**Option 1: Using the shell script**
+**Option 1: Automatic Setup**
 ```bash
 chmod +x setup_env.sh
 ./setup_env.sh
 ```
 
-**Option 2: Manual setup**
+**Option 2: Manual Setup**
 ```bash
 # Create virtual environment
 python3 -m venv venv
 
-# Activate virtual environment
+# Activate it
 source venv/bin/activate
 
 # Upgrade pip
 pip install --upgrade pip
 
-# Install requirements
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-## Activating the Virtual Environment
+> **Note**: If `requirements.txt` is missing or you prefer using modern tools, you can install the core dependencies directly:
+> ```bash
+> pip install langchain-openai langgraph finvizfinance pandas numpy scipy scikit-learn python-dotenv
+> ```
 
-After setup, whenever you want to work on the project:
+## 4. Running the Application
 
-**Windows:**
-```bash
-venv\Scripts\activate.bat
-```
+1.  **Activate your virtual environment** (if not already active):
+    *   Windows: `venv\Scripts\activate`
+    *   Mac/Linux: `source venv/bin/activate`
 
-**Linux/Mac:**
-```bash
-source venv/bin/activate
-```
+2.  **Run the entry point:**
+    ```bash
+    python src/main.py
+    ```
 
-You should see `(venv)` at the beginning of your command prompt when the environment is active.
-
-## Running the Application
-
-Once the virtual environment is activated and dependencies are installed:
-
-```bash
-python src/main.py
-```
+3.  **Enter a mandate** when prompted:
+    *   *Example:* "Construct a portfolio of large cap tech stocks with minimized volatility."
 
 ## Troubleshooting
 
-### Python not found
-- Ensure Python is installed and added to your system PATH
-- Try using `python3` instead of `python`
-- On Windows, try using `py` launcher: `py -m venv venv`
-
-### Virtual environment creation fails
-- Make sure you have write permissions in the project directory
-- Try deleting any existing `venv` folder and recreating it
-- Ensure you have enough disk space
-
-### Package installation fails
-- Make sure your internet connection is working
-- Try upgrading pip: `python -m pip install --upgrade pip`
-- Some packages may require system-level dependencies (especially on Linux)
-
+- **Import Errors**: If you see errors about missing modules (`langgraph`, `langchain`, etc.), ensure you have activated the virtual environment and ran the pip install command.
+- **API Key Errors**: Ensure your `.env` file is in the root directory and contains a valid `OPENAI_API_KEY`.

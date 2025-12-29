@@ -42,6 +42,12 @@ class SMAState(TypedDict, total=False):
     final_portfolio: dict
     """Tickers and weights."""
     
+    portfolio_value: float
+    """Total value of the portfolio entered by the user."""
+    
+    allocation_results: dict
+    """Detailed allocation with units and values per ticker."""
+    
     optimization_retry_count: int
     """Counter for optimization retries to prevent infinite loops."""
     

@@ -24,6 +24,7 @@ from src.agents.finviz_screener_agent import finviz_screener_node
 from src.agents.pricing_agent import pricing_agent_node
 from src.agents.optimizer_agent import generate_optimizer_code_node
 from src.tools.executor import execute_optimizer_code
+from src.agents.allocation_agent import allocation_agent_node
 
 
 def risk_model_node(state: SMAState) -> Dict:
@@ -280,7 +281,10 @@ def should_end(state: SMAState) -> str:
     last_feedback = feedback_list[-1].lower() if feedback_list else ""
     
     if "approved" in last_feedback:
+        print("\n✅ Portfolio APPROVED by Reviewer. Proceeding to Allocation Agent.")
         return "end"
+    
+    print(f"\n🛑 Portfolio NOT APPROVED by Reviewer (Status: '{last_feedback[:100]}...'). Workflow ending.")
     return "continue"
 
 
@@ -302,6 +306,7 @@ def create_workflow() -> StateGraph:
     workflow.add_node("generate_optimizer_code", generate_optimizer_code_node)
     workflow.add_node("execute_code", code_executor_node)
     workflow.add_node("review_portfolio", reviewer_agent_node)
+    workflow.add_node("allocate_funds", allocation_agent_node)
     
     # Define the workflow edges
     # Start -> MandateAgent
@@ -337,10 +342,13 @@ def create_workflow() -> StateGraph:
         "review_portfolio",
         should_end,
         {
-            "end": END,  # End if approved
-            "continue": END  # End even if not approved (could be changed to retry)
+            "end": "allocate_funds",  # Go to Allocation if approved
+            "continue": END  # End if not approved
         }
     )
+    
+    # AllocationAgent -> End
+    workflow.add_edge("allocate_funds", END)
     
     return workflow.compile()
 
