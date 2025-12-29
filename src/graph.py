@@ -160,10 +160,22 @@ def code_executor_node(state: SMAState) -> Dict:
         except (ValueError, TypeError):
             continue
     
+    feedback_msgs = ["Optimization successful. Weights calculated."]
+    
+    # Save optimization model description if available
+    if "problem_description" in result:
+        try:
+            with open("optimization_model.txt", "w") as f:
+                f.write(result["problem_description"])
+            feedback_msgs.append("Optimization model saved to optimization_model.txt for validation.")
+            print("📄 Optimization model saved to optimization_model.txt")
+        except Exception as e:
+            print(f"⚠️ Failed to save optimization model: {e}")
+
     print(f"✅ Optimization successful. Generated portfolio with {len(final_portfolio)} assets.")
     return {
         "final_portfolio": final_portfolio, 
-        "feedback": ["Optimization successful. Weights calculated."]
+        "feedback": feedback_msgs
     }
 
 

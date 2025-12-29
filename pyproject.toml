@@ -1,9 +1,13 @@
 [project]
-name = "poms"
+name = "agentic-optimizer"
 version = "0.1.0"
-description = "Add your description here"
+description = "An agentic optimizer for trading"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "finvizfinance>=1.2.0",
+    "pandas>=2.2.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "scikit-learn>=1.5.2",
 ]

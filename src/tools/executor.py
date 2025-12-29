@@ -93,6 +93,16 @@ def execute_optimizer_code(
     
     weights = local_namespace['weights']
     
+    # Extract problem definition if available
+    problem_description = ""
+    if 'problem' in local_namespace:
+        try:
+            prob = local_namespace['problem']
+            if isinstance(prob, cp.Problem):
+                problem_description = str(prob)
+        except Exception:
+            pass
+
     # Convert weights to appropriate format
     try:
         # If weights is a numpy array, convert to list/dict
@@ -125,7 +135,10 @@ def execute_optimizer_code(
                 "error": "Some weights are negative. Portfolio weights must be non-negative."
             }
         
-        return {"weights": weights_dict}
+        result = {"weights": weights_dict}
+        if problem_description:
+            result["problem_description"] = problem_description
+        return result
         
     except (ValueError, TypeError) as e:
         return {"error": f"Failed to convert weights to dictionary: {e}"}

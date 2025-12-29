@@ -74,7 +74,8 @@ Implementation Requirements:
 2. Constraints: sum(weights)==1, weights >= 0, weights <= max_position_weight (if provided).
 3. Handle risk levels (low/medium/high).
 4. Return results in `weights`.
-5. Output ONLY Python code.""")
+5. Assign the cvxpy problem instance to a variable named `problem` for validation.
+6. Output ONLY Python code.""")
     ])
     
     chain = prompt | llm

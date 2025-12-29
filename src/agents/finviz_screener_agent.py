@@ -26,6 +26,7 @@ SECTOR_MAPPING = {
     "finance": "Financial",
     "financials": "Financial",
     "banking": "Financial",
+    "banks": "Financial",
     # Energy
     "energy": "Energy",
     "oil": "Energy",
