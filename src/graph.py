@@ -15,6 +15,14 @@ from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from dotenv import load_dotenv
+import sys
+from pathlib import Path
+
+# Add project root to Python path to allow imports when running directly
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from src.state import SMAState
 
 # Load environment variables from .env file
@@ -232,7 +240,27 @@ Otherwise, provide specific feedback on what needs to be improved.""")
         review = response.content if hasattr(response, 'content') else str(response)
         review = review.strip()
         
-        return {"feedback": [f"Reviewer assessment: {review}"]}
+        # Check for automatic approval
+        if "APPROVED" in review:
+            return {"feedback": [f"Reviewer assessment: {review}"]}
+            
+        # Interactive Manual Override
+        print("\n" + "!"*80)
+        print("⚠️  The Reviewer Agent has concerns about the portfolio:")
+        print("-" * 80)
+        print(review)
+        print("-" * 80)
+        print("Do you want to OVERRIDE this assessment and proceed to allocation? (Y/N)")
+        
+        override = input("Override? > ").strip().lower()
+        
+        if override in ['y', 'yes', 'true', '1']:
+            print("✅ User manually APPROVED the portfolio.")
+            timestamped_feedback = f"Reviewer assessment: {review}"
+            return {"feedback": [timestamped_feedback, "APPROVED by User Override"]}
+        else:
+            print("❌ User rejected the portfolio.")
+            return {"feedback": [f"Reviewer assessment: {review}", "REJECTED by User"]}
         
     except Exception as e:
         error_msg = f"Error in reviewer agent: {str(e)}"
@@ -281,7 +309,10 @@ def should_end(state: SMAState) -> str:
     last_feedback = feedback_list[-1].lower() if feedback_list else ""
     
     if "approved" in last_feedback:
-        print("\n✅ Portfolio APPROVED by Reviewer. Proceeding to Allocation Agent.")
+        if "override" in last_feedback:
+            print("\n✅ Portfolio Manually APPROVED by User. Proceeding to Allocation Agent.")
+        else:
+            print("\n✅ Portfolio APPROVED by Reviewer. Proceeding to Allocation Agent.")
         return "end"
     
     print(f"\n🛑 Portfolio NOT APPROVED by Reviewer (Status: '{last_feedback[:100]}...'). Workflow ending.")
@@ -355,3 +386,30 @@ def create_workflow() -> StateGraph:
 
 # Create the compiled app
 app = create_workflow()
+
+
+def visualize_graph():
+    """
+    Visualizes the application graph. 
+    Intended for use in Jupyter/IPython environments.
+    """
+    try:
+        from IPython.display import Image, display
+        display(Image(app.get_graph().draw_mermaid_png()))
+    except ImportError:
+        print("IPython library not found. Please install ipython to visualize the graph.")
+    except Exception as e:
+        print(f"Could not visualize graph: {e}")
+
+
+if __name__ == "__main__":
+    # If run directly, try to save the graph image instead of displaying
+    try:
+        print("Generating graph visualization...")
+        img_bytes = app.get_graph().draw_mermaid_png()
+        output_file = "workflow_graph.png"
+        with open(output_file, "wb") as f:
+            f.write(img_bytes)
+        print(f"Graph saved to {output_file}")
+    except Exception as e:
+        print(f"Graph visualization failed: {e}")

@@ -103,6 +103,24 @@ def execute_optimizer_code(
         except Exception:
             pass
 
+    # Inspect problem status if available
+    if 'problem' in local_namespace:
+        try:
+            prob = local_namespace['problem']
+            if isinstance(prob, cp.Problem):
+                problem_description = str(prob)
+                if prob.status not in ["optimal", "optimal_inaccurate"]:
+                    return {
+                        "error": f"Optimization solver failed. Status: {prob.status}. Weights are not available."
+                    }
+        except Exception:
+            pass
+
+    if weights is None:
+        return {
+            "error": "Optimization variable 'weights' is None. The solver likely failed to find a solution (Infeasible or Unbounded)."
+        }
+
     # Convert weights to appropriate format
     try:
         # If weights is a numpy array, convert to list/dict
@@ -110,19 +128,46 @@ def execute_optimizer_code(
             weights = weights.flatten()  # Ensure 1D
             
             # Convert to dictionary with indices as keys
-            weights_dict = {str(i): float(w) for i, w in enumerate(weights)}
+            # Handle potential None/NaN in array if any
+            weights_list = []
+            for w in weights:
+                if w is None or (isinstance(w, float) and np.isnan(w)):
+                    weights_list.append(0.0)
+                else:
+                    weights_list.append(float(w))
+                    
+            weights_dict = {str(i): w for i, w in enumerate(weights_list)}
+
         elif isinstance(weights, (list, tuple)):
             # Convert list/tuple to dictionary
-            weights_dict = {str(i): float(w) for i, w in enumerate(weights)}
+            weights_dict = {}
+            for i, w in enumerate(weights):
+                if w is None:
+                    weights_dict[str(i)] = 0.0
+                else:
+                    weights_dict[str(i)] = float(w)
+
         elif isinstance(weights, dict):
             # Already a dictionary, ensure values are floats
-            weights_dict = {str(k): float(v) for k, v in weights.items()}
+            weights_dict = {}
+            for k, v in weights.items():
+                if v is None:
+                    weights_dict[str(k)] = 0.0
+                else:
+                    weights_dict[str(k)] = float(v)
         else:
             # Try to convert to float if single value
             weights_dict = {"0": float(weights)}
         
         # Validate weights sum to approximately 1.0 (allow small floating point errors)
         total_weight = sum(weights_dict.values())
+        
+        # Check if total weight is effectively zero (failed opt)
+        if total_weight < 1e-6:
+             return {
+                "error": f"Total portfolio weight is practically zero ({total_weight}). Optimization likely failed to allocate capital."
+            }
+
         if abs(total_weight - 1.0) > 0.01:  # Allow 1% tolerance
             return {
                 "error": f"Weights do not sum to 1.0 (sum={total_weight:.6f}). "
