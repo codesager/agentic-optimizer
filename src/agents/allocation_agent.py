@@ -46,23 +46,29 @@ def allocation_agent_node(state: SMAState) -> Dict:
     
     # 2. User Interaction
     print("\nThe portfolio has been generated and reviewed.")
-    print("Please enter the total Portfolio Value you intend to allocate (e.g., 1000000):")
+    # 2. User Interaction / Pre-set Value
+    print("\nThe portfolio has been generated and reviewed.")
     
-    while True:
-        try:
-            user_input = input("Total Value ($): ").strip().replace(",", "").replace("$", "")
-            if not user_input:
-                print("Skipping allocation calculation.")
-                return {"feedback": ["User skipped allocation step."]}
-                
-            portfolio_value = float(user_input)
-            if portfolio_value <= 0:
-                print("Value must be positive. Please try again.")
-                continue
-            break
-        except ValueError:
-            print("Invalid number. Please enter a numeric value (e.g. 100000).")
-            
+    portfolio_value = state.get("portfolio_value", 0.0)
+    
+    if not portfolio_value or portfolio_value <= 0:
+        # Fallback to CLI input ONLY if not already set (e.g. via API)
+        print("Please enter the total Portfolio Value you intend to allocate (e.g., 1000000):")
+        while True:
+            try:
+                user_input = input("Total Value ($): ").strip().replace(",", "").replace("$", "")
+                if not user_input:
+                    print("Skipping allocation calculation.")
+                    return {"feedback": ["User skipped allocation step."]}
+                    
+                portfolio_value = float(user_input)
+                if portfolio_value <= 0:
+                    print("Value must be positive. Please try again.")
+                    continue
+                break
+            except ValueError:
+                print("Invalid number. Please enter a numeric value (e.g. 100000).")
+    
     print(f"\n🔄 Calculating allocation for ${portfolio_value:,.2f}...\n")
     
     # 3. Calculation

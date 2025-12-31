@@ -245,22 +245,29 @@ Otherwise, provide specific feedback on what needs to be improved.""")
             return {"feedback": [f"Reviewer assessment: {review}"]}
             
         # Interactive Manual Override
-        print("\n" + "!"*80)
-        print("⚠️  The Reviewer Agent has concerns about the portfolio:")
-        print("-" * 80)
-        print(review)
-        print("-" * 80)
-        print("Do you want to OVERRIDE this assessment and proceed to allocation? (Y/N)")
+        # Only allow override if running interactively (CLI)
+        is_interactive = state.get("is_interactive", True)
         
-        override = input("Override? > ").strip().lower()
-        
-        if override in ['y', 'yes', 'true', '1']:
-            print("✅ User manually APPROVED the portfolio.")
-            timestamped_feedback = f"Reviewer assessment: {review}"
-            return {"feedback": [timestamped_feedback, "APPROVED by User Override"]}
+        if is_interactive:
+            print("\n" + "!"*80)
+            print("⚠️  The Reviewer Agent has concerns about the portfolio:")
+            print("-" * 80)
+            print(review)
+            print("-" * 80)
+            print("Do you want to OVERRIDE this assessment and proceed to allocation? (Y/N)")
+            
+            override = input("Override? > ").strip().lower()
+            
+            if override in ['y', 'yes', 'true', '1']:
+                print("✅ User manually APPROVED the portfolio.")
+                timestamped_feedback = f"Reviewer assessment: {review}"
+                return {"feedback": [timestamped_feedback, "APPROVED by User Override"]}
+            else:
+                print("❌ User rejected the portfolio.")
+                return {"feedback": [f"Reviewer assessment: {review}", "REJECTED by User"]}
         else:
-            print("❌ User rejected the portfolio.")
-            return {"feedback": [f"Reviewer assessment: {review}", "REJECTED by User"]}
+             # In API/Non-interactive mode, strictly follow Reviewer
+             return {"feedback": [f"Reviewer assessment: {review}"]}
         
     except Exception as e:
         error_msg = f"Error in reviewer agent: {str(e)}"
@@ -309,6 +316,12 @@ def should_end(state: SMAState) -> str:
     last_feedback = feedback_list[-1].lower() if feedback_list else ""
     
     if "approved" in last_feedback:
+        # Check for negation
+        if "not approved" in last_feedback:
+            # Continue to END (Rejected)
+            print(f"\n🛑 Portfolio NOT APPROVED by Reviewer (Status: '{last_feedback[:100]}...'). Workflow ending.")
+            return "continue"
+            
         if "override" in last_feedback:
             print("\n✅ Portfolio Manually APPROVED by User. Proceeding to Allocation Agent.")
         else:

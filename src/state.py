@@ -53,3 +53,6 @@ class SMAState(TypedDict, total=False):
     
     feedback: Annotated[List[str], operator.add]
     """A running log of comments and feedback from all agents."""
+
+    is_interactive: bool
+    """Flag to determine if the workflow is running in interactive CLI mode (True) or API mode (False)."""

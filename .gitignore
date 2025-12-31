@@ -17,3 +17,4 @@ uv.lock
 test*.*
 portfolio_allocation.csv
 portfolio_allocation.json
+Dockerfile
